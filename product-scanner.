@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>ماسح المنتجات</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      direction: rtl;
+      text-align: center;
+      padding: 20px;
+      background: #f4f6f9;
+    }
+    video {
+      width: 300px;
+      border: 2px solid #333;
+      border-radius: 10px;
+      margin-bottom: 10px;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px;
+      border-radius: 8px;
+      border: 1px solid #aaa;
+      font-size: 16px;
+    }
+    button {
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .card {
+      background: #fff;
+      margin: 15px auto;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      max-width: 400px;
+      text-align: right;
+    }
+    h2 { color: #333; }
+  </style>
+</head>
+<body>
+  <h1>📦 تطبيق فحص المنتجات</h1>
+
+  <!-- الكاميرا -->
+  <video id="video" autoplay></video>
+  <p id="scanResult">👉 ضع الباركود أمام الكاميرا</p>
+
+  <!-- إدخال يدوي -->
+  <div>
+    <input type="text" id="manualCode" placeholder="أدخل الباركود يدويًا">
+    <button onclick="searchProduct()">بحث</button>
+  </div>
+
+  <!-- تاريخ الصلاحية -->
+  <div>
+    <input type="date" id="expiryDate">
+    <button onclick="checkExpiry()">تحقق من الصلاحية</button>
+  </div>
+
+  <!-- النتائج -->
+  <div id="productInfo" class="card" style="display:none;"></div>
+  <div id="expiryInfo" class="card" style="display:none;"></div>
+  <div id="healthInfo" class="card" style="display:none;"></div>
+  <div id="benefitsInfo" class="card" style="display:none;"></div>
+
+  <!-- ZXing -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script>
+    const codeReader = new ZXing.BrowserMultiFormatReader();
+    const scanResult = document.getElementById("scanResult");
+
+    // تشغيل الكاميرا الخلفية
+    codeReader.listVideoInputDevices().then(devices => {
+      if (devices.length > 0) {
+        const backCam = devices.find(d => d.label.toLowerCase().includes('back')) || devices[0];
+        codeReader.decodeFromVideoDevice(backCam.deviceId, 'video', (result, err) => {
+          if (result) {
+            scanResult.textContent = "✅ الباركود: " + result.getText();
+            fetchProduct(result.getText());
+          }
+        });
+      } else {
+        scanResult.textContent = "❌ لا توجد كاميرا متاحة";
+      }
+    });
+
+    // بحث يدوي
+    function searchProduct() {
+      const code = document.getElementById("manualCode").value.trim();
+      if (code) {
+        scanResult.textContent = "✅ الباركود: " + code;
+        fetchProduct(code);
+      }
+    }
+
+    // جلب بيانات المنتج
+    async function fetchProduct(code) {
+      try {
+        let res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+        let data = await res.json();
+        if (data.status === 1) {
+          displayProduct(data.product);
+        } else {
+          document.getElementById("productInfo").style.display = "block";
+          document.getElementById("productInfo").innerHTML = "❌ المنتج غير موجود بقاعدة البيانات";
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // عرض البيانات
+    function displayProduct(product) {
+      let productInfo = document.getElementById("productInfo");
+      productInfo.style.display = "block";
+      productInfo.innerHTML = `
+        <h2>${product.product_name || "منتج غير معروف"}</h2>
+        <p><strong>المكونات:</strong> ${product.ingredients_text || "غير متوفرة"}</p>
+      `;
+
+      // التحليل الصحي
+      let nutriments = product.nutriments || {};
+      let healthInfo = document.getElementById("healthInfo");
+      healthInfo.style.display = "block";
+      let sugar = nutriments.sugars_100g || 0;
+      let salt = nutriments.salt_100g || 0;
+      let fat = nutriments['saturated-fat_100g'] || 0;
+      let energy = nutriments['energy-kcal_100g'] || 0;
+      let fiber = nutriments.fiber_100g || 0;
+
+      let healthText = `
+        <h2>التحليل الصحي</h2>
+        <p>سكر: ${sugar} جم /100جم</p>
+        <p>ملح: ${salt} جم /100جم</p>
+        <p>دهون مشبعة: ${fat} جم /100جم</p>
+        <p>سعرات: ${energy} ك.س /100جم</p>
+        <p>ألياف: ${fiber} جم /100جم</p>
+      `;
+
+      let risk = [];
+      if (sugar > 15) risk.push("⚠️ نسبة السكر عالية");
+      if (salt > 1.5) risk.push("⚠️ نسبة الملح مرتفعة");
+      if (fat > 5) risk.push("⚠️ يحتوي دهون مشبعة كثيرة");
+      if (energy > 400) risk.push("⚠️ سعراته الحرارية عالية");
+
+      if (risk.length === 0) {
+        healthText += "<p>✅ المنتج صحي بشكل عام</p>";
+      } else {
+        healthText += "<p>" + risk.join("<br>") + "</p>";
+      }
+      healthInfo.innerHTML = healthText;
+
+      // الفوائد / الأضرار
+      let benefitsInfo = document.getElementById("benefitsInfo");
+      benefitsInfo.style.display = "block";
+      let benefits = [];
+      let harms = [];
+
+      if (fiber > 2) benefits.push("💚 غني بالألياف ويفيد الهضم");
+      if (sugar > 15) harms.push("❌ قد يسبب زيادة الوزن أو تسوس الأسنان");
+      if (fat > 5) harms.push("❌ يرفع نسبة الكوليسترول");
+      if (salt > 1.5) harms.push("❌ قد يسبب ارتفاع ضغط الدم");
+
+      benefitsInfo.innerHTML = `
+        <h2>الفوائد والأضرار</h2>
+        <p><strong>فوائد:</strong><br>${benefits.join("<br>") || "لا توجد مميزات بارزة"}</p>
+        <p><strong>أضرار:</strong><br>${harms.join("<br>") || "لا توجد مخاطر كبيرة"}</p>
+      `;
+    }
+
+    // فحص تاريخ الانتهاء
+    function checkExpiry() {
+      let expiryDate = document.getElementById("expiryDate").value;
+      let expiryInfo = document.getElementById("expiryInfo");
+      expiryInfo.style.display = "block";
+      if (!expiryDate) {
+        expiryInfo.innerHTML = "⚠️ من فضلك أدخل تاريخ الصلاحية";
+        return;
+      }
+      let today = new Date();
+      let exp = new Date(expiryDate);
+      if (exp < today) {
+        expiryInfo.innerHTML = "❌ المنتج منتهي الصلاحية";
+      } else {
+        expiryInfo.innerHTML = "✅ المنتج صالح للاستخدام";
+      }
+    }
+  </script>
+</body>
+</html>
